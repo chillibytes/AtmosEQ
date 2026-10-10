@@ -10,7 +10,14 @@ research/bin/%: research/%.swift
 	@mkdir -p research/bin
 	$(SWIFTC) $< -o $@
 
-clean:
-	rm -rf atmoseq research/bin
+# Build AtmosEQ.app, install it in ~/Applications and start it at login.
+install:
+	packaging/install.sh
 
-.PHONY: research clean
+uninstall:
+	packaging/uninstall.sh
+
+clean:
+	rm -rf atmoseq build research/bin
+
+.PHONY: research install uninstall clean

@@ -165,12 +165,11 @@ Music pre-loads the next track. A stereo track queued after an Atmos one gets it
 
 The helper adds EQ only when all of these hold, otherwise audio passes through unchanged:
 
-1. Music's EQ log lines have been seen at all.
-2. The last `EQEffectsProcessor::SetEQSettings` said `(enabled)`.
-3. The stream that last started playing is known, and it is an Atmos stream (`qc+3`, or more than two channels).
-4. That stream is not between `EQEffectsProcessor::Prepare` and `Unprepare`, meaning Music's own EQ is not running on it.
+1. Music's EQ is on: the last `EQEffectsProcessor::SetEQSettings` said `(enabled)`. Until one has been seen, Music's `eqEnabled` preference is used.
+2. The stream that last started playing is known, and it is an Atmos stream (`qc+3`, or more than two channels).
+3. That stream is not between `EQEffectsProcessor::Prepare` and `Unprepare`, meaning Music's own EQ is not running on it.
 
-If a macOS update renames or hides these messages, condition 1 or 3 fails and the helper does nothing. The failure mode is flat Atmos, never a doubled EQ.
+If a macOS update renames or hides the stream messages, condition 2 fails and the helper does nothing. If only the EQ messages go, stereo streams are still left alone by condition 2. The failure mode is flat Atmos, never a doubled EQ on a stereo track.
 
 One more guard covers the Atmos-to-stereo change. Music usually stops and restarts its device IO between tracks. If playback restarts while a pre-loaded stream already has Music's EQ, that stream is probably the one starting, so the helper stays dry until the log shows which stream started (or two seconds pass). Without a restart, on a truly gapless change, the handover lags by the log's delivery time.
 

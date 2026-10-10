@@ -2,6 +2,7 @@
 /atmoseq
 /atmoseq.*
 /research/bin/
+/build/
 
 # recordings and run output
 /research/out/

@@ -33,6 +33,18 @@ make          # or: swiftc -O -swift-version 5 main.swift -o atmoseq
 
 Leave it running in a terminal. Ctrl-C stops it and Music plays as before.
 
+### Start at login
+
+```sh
+make install
+```
+
+This builds `AtmosEQ.app`, puts it in `~/Applications`, and registers it as a login item (a LaunchAgent, so it also comes back if it ever crashes). It has no window or menu bar icon; what it is doing is in `~/Library/Logs/AtmosEQ.log`. It never launches Music by itself and sits idle until Music plays.
+
+`make uninstall` stops it and removes the app, the login item and its permission entries.
+
+The app is ad-hoc signed, and macOS ties permissions to the exact build. Reinstalling an unchanged build keeps them; after a change the installer clears the old entries and macOS asks again.
+
 A normal session looks like this:
 
 ```
@@ -46,7 +58,7 @@ stopped → tap idle (device free to sleep)
 
 ## Permissions
 
-macOS asks for these on behalf of the app you start the helper from (Terminal, iTerm and so on):
+macOS asks for these on behalf of the app you start the helper from (Terminal, iTerm and so on), or for AtmosEQ itself when it is installed as a login item:
 
 | Permission | Needed for | Without it |
 |---|---|---|
@@ -81,7 +93,8 @@ Music itself only reads the preamp when a track starts. AtmosEQ applies it while
 ## Status and limits
 
 - Tested on macOS 26.7.1 (25G241) with Music 1.6.6 and AirPods Pro 3. It follows output changes and has also attached to AirPods Max and the built-in speakers.
-- It runs in a terminal. There is no login item or menu bar app yet.
+- There is no menu bar icon or settings window. As a login item its only output is the log file.
+- Inside the app bundle the helper checks and requests the System Audio Recording permission through a private TCC call, because there is no public one. If a macOS update removes it, the helper falls back to the silence failsafe.
 - It depends on four log messages from the Music process: `EQEffectsProcessor::Prepare/Unprepare stream`, `EQEffectsProcessor::SetEQSettings`, `Created new AudioQueue for format` and `faqrp_startTimebaseCommon … calling CMTimebaseSetRateAndAnchorTime`. If a macOS update removes them, the helper stops adding EQ and Atmos plays flat again; it never stacks a second EQ on a stereo track.
 - When an Atmos track is followed by a stereo one, the handover to Music's own EQ waits for a log line. If playback restarts between the two tracks, which is the usual case, the helper holds back until it knows which stream started. On a truly gapless change the first fraction of a second of the stereo track can get both EQs.
 - Only boosts were measured. Sliders below 0 dB are assumed to mirror boosts.

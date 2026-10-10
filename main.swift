@@ -13,6 +13,7 @@
 //
 // The IO callback is allocation-free: all DSP state lives in raw buffers.
 
+import AppKit
 import ApplicationServices
 import AudioToolbox
 import CoreAudio
@@ -226,11 +227,44 @@ func run(_ path: String, _ args: [String]) -> String {
     return String(decoding: data, as: UTF8.self)
 }
 
-func musicPID() -> pid_t? { run("/usr/bin/pgrep", ["-x", "Music"]).split(separator: "\n").first.flatMap { pid_t($0) } }
+func musicPID() -> pid_t? {
+    NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.Music").first?.processIdentifier
+}
 
 func log(_ s: String) {
     let f = DateFormatter(); f.dateFormat = "HH:mm:ss"
     print("[\(f.string(from: Date()))] \(s)"); fflush(stdout)
+}
+
+// MARK: - System Audio Recording permission
+//
+// A tap without permission delivers silence while Music stays muted. There is no public
+// call to check or request this permission, so inside the app bundle we use the same
+// TCC entry points other tap-based apps use, and never create a tap until it is granted.
+// From a terminal the terminal app holds the permission and the silence failsafe covers it.
+
+enum CapturePermission {
+    private typealias Preflight = @convention(c) (CFString, CFDictionary?) -> Int
+    private typealias Request = @convention(c) (CFString, CFDictionary?, @escaping (Bool) -> Void) -> Void
+    private static let handle = dlopen("/System/Library/PrivateFrameworks/TCC.framework/Versions/A/TCC", RTLD_NOW)
+    private static let service = "kTCCServiceAudioCapture" as CFString
+
+    /// true = granted, false = denied, nil = not asked yet (or the entry point is gone).
+    static func status() -> Bool? {
+        guard let handle, let sym = dlsym(handle, "TCCAccessPreflight") else { return nil }
+        switch unsafeBitCast(sym, to: Preflight.self)(service, nil) {
+        case 0: return true
+        case 1: return false
+        default: return nil
+        }
+    }
+
+    /// Shows the system prompt if needed; returns false when the entry point is missing.
+    static func request(_ done: @escaping (Bool) -> Void) -> Bool {
+        guard let handle, let sym = dlsym(handle, "TCCAccessRequest") else { return false }
+        unsafeBitCast(sym, to: Request.self)(service, nil) { granted in DispatchQueue.main.async { done(granted) } }
+        return true
+    }
 }
 
 // MARK: - Tap + aggregate device, IO gated on the target process actually playing
@@ -401,8 +435,11 @@ final class MusicWatcher {
 
     // A stream that has been playing (or paused) for longer than the quick replay window
     // has no creation line in it. Fill only what is still unknown, off the main thread.
+    private var lastBackfill = Date.distantPast
     func backfillIfNeeded() {
         guard current == nil || spatial[current!] == nil || !sawEQLine else { return }
+        guard Date().timeIntervalSince(lastBackfill) > 600 else { return }
+        lastBackfill = Date()
         DispatchQueue.global().async {
             let old = MusicWatcher(); old.replay("6h")
             DispatchQueue.main.async {
@@ -414,8 +451,15 @@ final class MusicWatcher {
         }
     }
 
+    private var streamProc: Process?
+    private var stopped = false
+
+    func stop() { stopped = true; streamProc?.terminate() }
+
     func stream() {
+        guard !stopped else { return }
         let p = Process(), pipe = Pipe()
+        streamProc = p
         p.executableURL = URL(fileURLWithPath: "/usr/bin/log")
         p.arguments = ["stream", "--style", "compact", "--predicate", predicate]
         p.standardOutput = pipe
@@ -534,6 +578,7 @@ let test = testSeconds > 0
 let engine = Engine()
 let watcher = MusicWatcher()
 var lastPreset: [Double] = []
+var captureAllowed = true   // only ever false inside the app bundle, until permission is granted
 var lastWet: Bool?
 var lastReason = ""
 // Set when playback (re)starts while a pre-loaded stream already has Music's EQ: that
@@ -545,8 +590,10 @@ var reportedAudio = false
 // that is PLAYING is an Atmos stream and Music's own EQ is not attached to it.
 // Anything unknown → stay out (never double the EQ).
 func passthroughReason() -> String {
-    if !watcher.sawEQLine { return "can't see Music's EQ log lines yet" }
-    if !watcher.eqEnabled { return "Music's EQ is off" }
+    // Until a log line says otherwise, take the EQ switch from Music's preferences.
+    let eqOn = watcher.sawEQLine ? watcher.eqEnabled
+                                 : (CFPreferencesCopyAppValue("eqEnabled" as CFString, "com.apple.Music" as CFString) as? Bool ?? false)
+    if !eqOn { return "Music's EQ is off" }
     if holdUntil > Date() { return "song change — waiting to see which stream starts" }
     guard let cur = watcher.current, let spatial = watcher.spatial[cur] else { return "don't know which stream is playing yet" }
     if !spatial { return "stereo stream \(cur) — Music's own EQ handles it" }
@@ -575,23 +622,43 @@ func applyEQ(name: String, pre: Double, gains: [Double]) {
     lastPreset = flat
     let pre = preampOverride ?? pre
     dsp.load(preampDB: pre, gains: gains)
-    log("EQ \"\(presetName)\": preamp \(String(format: "%+.1f", pre)) dB (EQ strength \(Int((pow(10, pre / 20) * 100).rounded()))%), bands \(gains.map { String(format: "%.1f", $0) }.joined(separator: " "))")
+    eqLogWork?.cancel()   // log once a drag settles, not five times a second
+    let work = DispatchWorkItem {
+        log("EQ \"\(presetName)\": preamp \(String(format: "%+.1f", pre)) dB (EQ strength \(Int((pow(10, pre / 20) * 100).rounded()))%), bands \(gains.map { String(format: "%.1f", $0) }.joined(separator: " "))")
+    }
+    eqLogWork = work
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
 }
+var eqLogWork: DispatchWorkItem?
 
 // Fallback path (Equalizer window closed, or no Accessibility permission).
+// AppleScript runs off the main thread: it can sit behind a permission prompt or a busy Music.
+var presetReadInFlight = false
 func refreshPreset() {
-    guard let (pre, gains) = readPreset(presetName) else { return }
-    applyEQ(name: presetName, pre: pre, gains: gains)
+    guard musicPID() != nil, !presetReadInFlight else { return }   // "tell application" would launch Music
+    presetReadInFlight = true
+    let name = presetName
+    DispatchQueue.global(qos: .userInitiated).async {
+        let result = readPreset(name)
+        DispatchQueue.main.async {
+            presetReadInFlight = false
+            if let (pre, gains) = result, name == presetName { applyEQ(name: name, pre: pre, gains: gains) }
+        }
+    }
 }
 
 let eqWindow = EQWindowReader()
-let axTrusted = AXIsProcessTrusted()
+var axTrusted = AXIsProcessTrusted()
 var windowOpen = false
 var pollCount = 0
 
 // 5 Hz while the Equalizer window is open (slider drags apply live), 1 Hz to notice it opening.
 func pollEQWindow() {
     pollCount += 1
+    if !axTrusted, pollCount % 10 == 0, AXIsProcessTrusted() {
+        axTrusted = true
+        log("live EQ control: on (Accessibility granted)")
+    }
     guard axTrusted, !test, engine.ready, windowOpen || pollCount % 5 == 0 else { return }
     if let r = eqWindow.read(pid: engine.pid) {
         windowOpen = true
@@ -609,7 +676,7 @@ engine.onIOWillStart = {
     DispatchQueue.main.asyncAfter(deadline: .now() + 2.05) { updateWet() }   // fallback release
 }
 engine.onIOChange = {
-    if engine.ioRunning { reportedAudio = false }
+    if engine.ioRunning { reportedAudio = false; if !test && !always { watcher.backfillIfNeeded() } }
     log(engine.ioRunning ? "playing → tap running" : "stopped → tap idle (device free to sleep)")
 }
 
@@ -630,6 +697,11 @@ func tick() {
             engine.suppressed = true; engine.sync(); engine.overloadTimes.removeAll()
             log("FAILSAFE: sustained audio overloads — tap released, Music unmuted until the next play/stop.")
         }
+    }
+    if !captureAllowed {
+        guard CapturePermission.status() == true else { return }
+        captureAllowed = true
+        log("System Audio Recording granted")
     }
     engine.sync()
     if !test { updateWet() }
@@ -665,7 +737,7 @@ func finishTest() -> Never {
 for sig in [SIGINT, SIGTERM] {
     signal(sig, SIG_IGN)
     let src = DispatchSource.makeSignalSource(signal: sig, queue: .main)
-    src.setEventHandler { if test { finishTest() }; engine.teardown(); log("stopped"); exit(0) }
+    src.setEventHandler { if test { finishTest() }; engine.teardown(); watcher.stop(); log("stopped"); exit(0) }
     src.resume()
     _ = Unmanaged.passRetained(src)
 }
@@ -680,6 +752,24 @@ if let w = replayWindow {
     exit(0)
 }
 
+// As a login item there is no terminal: write to the file launchd names, capped at 1 MB.
+if let path = ProcessInfo.processInfo.environment["ATMOSEQ_LOG"], !test {
+    if let size = (try? FileManager.default.attributesOfItem(atPath: path))?[.size] as? Int, size > 1_000_000 {
+        try? FileManager.default.removeItem(atPath: path + ".1")
+        try? FileManager.default.moveItem(atPath: path, toPath: path + ".1")
+    }
+    freopen(path, "a", stdout)
+}
+
+// Two instances would each tap Music and play it back, doubling the EQ.
+if !test {
+    let fd = open(NSTemporaryDirectory() + "dev.chillibytes.atmoseq.lock", O_CREAT | O_RDWR, 0o600)
+    if fd < 0 || flock(fd, LOCK_EX | LOCK_NB) != 0 {
+        log("another AtmosEQ is already running (login item?) — exiting")
+        exit(0)
+    }
+}
+
 if test {
     dsp.testMode = true
     dsp.recCap = Int(testSeconds * 48000 * 1.1)
@@ -687,20 +777,37 @@ if test {
     dsp.recDry = .allocate(capacity: dsp.recCap * 2)
     DispatchQueue.main.asyncAfter(deadline: .now() + testSeconds + 1) { finishTest() }
 }
+if Bundle.main.bundleIdentifier != nil, !test, CapturePermission.status() != true {
+    captureAllowed = false
+    let asked = CapturePermission.status() == nil && CapturePermission.request { granted in
+        log(granted ? "System Audio Recording allowed" : "System Audio Recording was denied — allow AtmosEQ under Privacy & Security > Screen & System Audio Recording")
+    }
+    if CapturePermission.status() == nil && !asked { captureAllowed = true }   // can't ask: fall back to the silence failsafe
+    else { log("waiting for System Audio Recording permission (Music plays untouched until then)") }
+}
 if !always && !test { watcher.replay("20m"); watcher.stream() }
 watcher.onChange = updateWet
 watcher.onStreamStart = { holdUntil = .distantPast }   // runs before onChange → updateWet
 var lastSettingsRefresh = Date.distantPast
 watcher.onSettings = {
-    // Without the window reader, follow Music's "settings changed" events (throttled).
-    guard !windowOpen, Date().timeIntervalSince(lastSettingsRefresh) > 0.3 else { return }
-    lastSettingsRefresh = Date(); refreshPreset()
+    // Without the window reader, follow Music's "settings changed" events: at most every
+    // 0.3 s while they keep coming, plus once more after the last one.
+    guard !windowOpen else { return }
+    settingsWork?.cancel()
+    if Date().timeIntervalSince(lastSettingsRefresh) > 0.3 { lastSettingsRefresh = Date(); refreshPreset(); return }
+    let work = DispatchWorkItem { lastSettingsRefresh = Date(); refreshPreset() }
+    settingsWork = work
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: work)
 }
+var settingsWork: DispatchWorkItem?
 tick()
 refreshPreset()
 updateWet()
 if !always && !test {
-    watcher.backfillIfNeeded()
+    // Inside the app bundle, ask for Accessibility once (the system shows the dialog).
+    if !axTrusted, Bundle.main.bundleIdentifier != nil {
+        axTrusted = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary)
+    }
     log(axTrusted ? "live EQ control: on (reads Music's Equalizer window while it's open)"
                   : "live EQ control: limited (no Accessibility permission) — following preset \"\(presetName)\" via AppleScript")
 }
@@ -708,9 +815,8 @@ if !always && !test {
 var outAddr = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDefaultOutputDevice, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
 AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &outAddr, .main) { _, _ in tick() }
 // Start/stop with Music's output even if the HAL notification is missed.
-Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in engine.sync() }
-Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { _ in pollEQWindow() }
+Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in engine.sync() }.tolerance = 0.02
+Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { _ in pollEQWindow() }.tolerance = 0.05
 if test, let t = targetPID { kill(t, SIGUSR1) }  // tone generator: start once muted by the tap
-Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { _ in tick() }
-Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { _ in if !windowOpen { refreshPreset() } }
+Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { _ in tick() }.tolerance = 0.3
 RunLoop.main.run()
