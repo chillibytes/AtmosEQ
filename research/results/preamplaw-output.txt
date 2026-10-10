@@ -1,0 +1,103 @@
+measured at band centers:
+  preamp  +0.00: +15.7 +15.6 +10.2  +4.8  +1.6  +3.0  +3.8  +4.4  +5.4  +3.6
+  preamp  -6.00:  +9.8  +9.0  +5.3  +2.2  +0.9  +1.6  +1.7  +1.9  +3.0  +2.1
+  preamp -12.00:  +5.7  +4.8  +2.6  +1.1  +0.4  +0.7  +1.0  +0.9  +1.5  +1.5
+  preamp  -2.76: +12.7 +12.3  +7.5  +3.4  +1.2  +2.4  +2.9  +3.3  +4.2  +2.9
+  preamp  -2.76: +12.9 +12.3  +7.6  +3.5  +1.2  +2.3  +2.9  +3.3  +4.2  +2.9
+
+== 1. free EQ-strength factor per recording
+
+MODEL A  parallel band-pass bank, H = 1 + p·c·Σ(g−1)·BP: Q 1.36, c 1.46, overall rms 0.76 dB
+  preamp  +0.00 dB: fitted p 1.000  (10^(P/20) = 1.000)  rms 1.16 dB
+  preamp  -6.00 dB: fitted p 0.433  (10^(P/20) = 0.501)  rms 0.53 dB
+  preamp -12.00 dB: fitted p 0.194  (10^(P/20) = 0.251)  rms 0.29 dB
+  preamp  -2.76 dB: fitted p 0.679  (10^(P/20) = 0.728)  rms 0.77 dB
+  preamp  -2.76 dB: fitted p 0.698  (10^(P/20) = 0.728)  rms 0.75 dB
+
+MODEL B  blended peaking cascade, H = 1 + p·(ΠPeak − 1): Q 1.00, gain scale 1.06, overall rms 0.45 dB
+  preamp  +0.00 dB: fitted p 1.000  (10^(P/20) = 1.000)  rms 0.55 dB
+  preamp  -6.00 dB: fitted p 0.429  (10^(P/20) = 0.501)  rms 0.35 dB
+  preamp -12.00 dB: fitted p 0.191  (10^(P/20) = 0.251)  rms 0.39 dB
+  preamp  -2.76 dB: fitted p 0.677  (10^(P/20) = 0.728)  rms 0.32 dB
+  preamp  -2.76 dB: fitted p 0.697  (10^(P/20) = 0.728)  rms 0.57 dB
+
+== 2. fixed laws, RBJ peaking cascade
+B20  whole-EQ blend  H = 1 + p(H0 − 1), k = 20
+   Q 1.00, gain scale 1.02, p = 10^(P/20.0): rms 0.53 dB   per recording: 0.66 0.44 0.59 0.33 0.58
+Bk   whole-EQ blend, k free
+   Q 0.98, gain scale 1.05, p = 10^(P/16.5): rms 0.45 dB   per recording: 0.55 0.34 0.39 0.32 0.58
+C20  per-band blend  g' = 1 + p(g − 1), k = 20
+   Q 1.02, gain scale 1.05, p = 10^(P/20.0): rms 0.46 dB   per recording: 0.59 0.35 0.42 0.34 0.53
+Ck   per-band blend, k free
+   Q 1.04, gain scale 1.10, p = 10^(P/17.0): rms 0.40 dB   per recording: 0.54 0.27 0.25 0.33 0.51
+Dk   dB scaling  G' = G(1 + P/k), k free
+   Q 1.12, gain scale 1.10, p = 10^(P/17.0): rms 0.54 dB   per recording: 0.65 0.54 0.40 0.46 0.61
+Ek   dB scaling  G' = G·10^(P/k), k free
+   Q 1.10, gain scale 1.15, p = 10^(P/24.0): rms 0.49 dB   per recording: 0.56 0.39 0.36 0.44 0.63
+
+== 3. constant-pole bells
+F   bells in series, g' = 1 + p(g − 1): everything nominal (scale 1.00, k 20)
+   Q 1.38, gain scale 1.00, p = 10^(P/20.0): rms 0.40 dB   per recording: 0.44 0.35 0.26 0.37 0.51
+F   same, gain scale free, k = 20
+   Q 1.32, gain scale 0.98, p = 10^(P/20.0): rms 0.39 dB   per recording: 0.43 0.34 0.26 0.36 0.51
+F   same, gain scale and k free
+   Q 1.30, gain scale 0.97, p = 10^(P/20.5): rms 0.39 dB   per recording: 0.42 0.34 0.26 0.35 0.51
+A   bells in parallel, H = 1 + pΣ(g − 1)BP: nominal (scale 1.00, k 20)
+   Q 0.94, gain scale 1.00, p = 10^(P/20.0): rms 0.92 dB   per recording: 1.40 0.59 0.41 0.91 0.98
+A   same, gain scale and k free
+   Q 1.32, gain scale 1.25, p = 10^(P/16.5): rms 0.70 dB   per recording: 1.05 0.53 0.32 0.72 0.66
+Q 1.300 nominal: rms 0.45 dB  per recording 0.59 0.37 0.27 0.43 0.52
+Q 1.380 nominal: rms 0.40 dB  per recording 0.44 0.35 0.26 0.37 0.51
+Q 1.414 nominal: rms 0.41 dB  per recording 0.43 0.37 0.27 0.38 0.54
+
+  freq    P=0 meas  model    P=-6 meas model    P=-12 meas model
+     25   +12.41  +12.59      +7.40   +7.50      +4.08   +4.20
+     31   +15.70  +15.47      +9.80   +9.58      +5.75   +5.62
+     40   +16.02  +16.10      +9.78   +9.59      +5.53   +5.36
+     50   +16.05  +16.05      +9.28   +9.20      +4.95   +4.90
+     63   +15.59  +15.78      +8.96   +8.96      +4.81   +4.81
+     79   +13.67  +13.88      +7.47   +7.47      +3.84   +3.85
+    100   +11.67  +11.91      +6.04   +6.08      +2.98   +3.01
+    126   +10.15  +10.32      +5.26   +5.22      +2.60   +2.60
+    159    +7.70   +7.87      +3.89   +3.82      +1.89   +1.86
+    200    +5.88   +5.95      +2.86   +2.79      +1.37   +1.34
+    252    +4.82   +4.79      +2.25   +2.27      +1.13   +1.10
+    317    +3.12   +3.30      +1.42   +1.54      +0.72   +0.74
+    400    +2.10   +2.17      +1.02   +0.98      +0.50   +0.47
+    504    +1.60   +1.69      +0.88   +0.77      +0.38   +0.36
+    635    +1.65   +1.78      +1.01   +0.84      +0.36   +0.41
+    800    +2.25   +2.43      +1.28   +1.21      +0.57   +0.60
+   1008    +3.00   +3.11      +1.64   +1.59      +0.68   +0.81
+   1270    +2.98   +3.02      +2.30   +1.51      +0.86   +0.75
+   1600    +3.22   +3.24      +1.87   +1.63      +0.65   +0.82
+   2016    +3.75   +3.70      +1.74   +1.91      +0.98   +0.97
+   2540    +3.58   +3.41      +2.15   +1.71      +1.38   +0.86
+   3200    +3.74   +3.52      +1.78   +1.76      +1.16   +0.88
+   4032    +4.37   +3.99      +1.93   +2.04      +0.87   +1.04
+   5080    +4.38   +3.76      +2.73   +1.88      +1.43   +0.94
+   6400    +4.77   +4.11      +2.85   +2.11      +1.63   +1.07
+   8063    +5.41   +4.72      +2.97   +2.55      +1.52   +1.34
+  10159    +4.91   +3.48      +2.20   +1.77      +1.34   +0.89
+  12800    +3.95   +2.77      +2.09   +1.35      +1.07   +0.67
+  16127    +3.61   +3.72      +2.12   +2.00      +1.51   +1.05
+
+== 4. high-frequency design
+constant-Q, designed at 44100 Hz: best Q 1.37  rms 0.45 dB  [0.52 0.39 0.28 0.43 0.55]
+BW-octaves,  designed at 44100 Hz: best BW 0.99 oct  rms 0.27 dB  [0.26 0.25 0.21 0.16 0.42]
+constant-Q, designed at 48000 Hz: best Q 1.38  rms 0.40 dB  [0.44 0.35 0.26 0.37 0.51]
+BW-octaves,  designed at 48000 Hz: best BW 0.99 oct  rms 0.26 dB  [0.21 0.24 0.21 0.13 0.41]
+constant-Q, designed at 96000 Hz: best Q 1.40  rms 0.27 dB  [0.22 0.25 0.22 0.17 0.41]
+BW-octaves,  designed at 96000 Hz: best BW 1.00 oct  rms 0.26 dB  [0.20 0.24 0.21 0.14 0.41]
+
+  freq    P=0 meas   BW1.0@44.1k  BW1.0@48k   constQ1.41@48k
+   1600    +3.22      +3.41       +3.38       +3.24
+   2016    +3.75      +3.95       +3.91       +3.70
+   2540    +3.58      +3.80       +3.74       +3.41
+   3200    +3.74      +4.07       +3.98       +3.52
+   4032    +4.37      +4.74       +4.62       +3.99
+   5080    +4.38      +4.85       +4.69       +3.76
+   6400    +4.77      +5.37       +5.19       +4.11
+   8063    +5.41      +6.05       +5.86       +4.72
+  10159    +4.91      +5.39       +5.24       +3.48
+  12800    +3.95      +4.40       +4.41       +2.77
+  16127    +3.61      +3.78       +3.89       +3.72

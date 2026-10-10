@@ -1,0 +1,17 @@
+# build products
+/atmoseq
+/atmoseq.*
+/research/bin/
+
+# recordings and run output
+/research/out/
+*.wav
+*.csv
+*.log
+*.fifo
+
+# scratch folders from the original investigation
+/cal/
+/probe/
+
+.DS_Store
