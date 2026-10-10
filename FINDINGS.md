@@ -153,13 +153,27 @@ The helper therefore takes the EQ's on/off state from Music's log and the slider
 
 ## 6. When the helper adds EQ
 
-All of these must hold, otherwise audio passes through unchanged:
+Music numbers its audio streams (`RP/NQ.N` in the coremedia log lines, the same `N` as in `EQEffectsProcessor::Prepare stream N`). Three kinds of log line give the full picture:
+
+```
+subaq_buildCAAudioQueue: … RP/NQ.865 Created new AudioQueue for format:'qlac' …, channelsPerFrame:2     ← stream exists, and its format
+EQEffectsProcessor::Prepare stream 865                                                                   ← Music's EQ is attached to it
+faqrp_startTimebaseCommon: (… RP/NQ.865) calling CMTimebaseSetRateAndAnchorTime … with rate 1.00         ← it starts playing
+```
+
+Music pre-loads the next track. A stereo track queued after an Atmos one gets its stream created and its EQ prepared seconds into the Atmos track, long before it plays. So "some stream has Music's EQ" says nothing about the audio you are hearing; an earlier build used that test and dropped its EQ three seconds into an Atmos song.
+
+The helper adds EQ only when all of these hold, otherwise audio passes through unchanged:
 
 1. Music's EQ log lines have been seen at all.
 2. The last `EQEffectsProcessor::SetEQSettings` said `(enabled)`.
-3. The last settled `Audio format changed to PBAudioFormat.…` was `dolbyAtmos`, or no format has been logged yet.
-4. No stream is currently between `EQEffectsProcessor::Prepare` and `Unprepare`, meaning Music's own EQ is not running.
+3. The stream that last started playing is known, and it is an Atmos stream (`qc+3`, or more than two channels).
+4. That stream is not between `EQEffectsProcessor::Prepare` and `Unprepare`, meaning Music's own EQ is not running on it.
 
 If a macOS update renames or hides these messages, condition 1 or 3 fails and the helper does nothing. The failure mode is flat Atmos, never a doubled EQ.
+
+One more guard covers the Atmos-to-stereo change. Music usually stops and restarts its device IO between tracks. If playback restarts while a pre-loaded stream already has Music's EQ, that stream is probably the one starting, so the helper stays dry until the log shows which stream started (or two seconds pass). Without a restart, on a truly gapless change, the handover lags by the log's delivery time.
+
+`atmoseq --replay 30m` runs the recent log through these rules and prints each decision.
 
 Two failsafes release the tap, which unmutes Music: only silence captured for five seconds while Music plays, or a sustained burst of IO overloads.

@@ -3,8 +3,8 @@
 // Music skips attaching its EQ processing tap to player items created with spatial
 // formats allowed, so Atmos plays flat. This taps Music's (already spatialized)
 // output on the current output device, mutes the original, and plays it back with
-// the EQ applied — but only while Music's own EQ is enabled and not actually running
-// on the current stream (per Music's log).
+// the EQ applied — but only while Music's own EQ is enabled, the stream that is playing
+// is an Atmos stream, and Music's EQ is not attached to that stream (per Music's log).
 //
 // Clocking: the tap is a device-stream tap (same clock as the output device) with
 // drift compensation off. A stereo-mixdown tap runs on its own clock, and every
@@ -251,6 +251,7 @@ final class Engine {
     var lastPlaying = false
     var overloadTimes: [Date] = []
     var onIOChange: () -> Void = {}
+    var onIOWillStart: () -> Void = {}
 
     var ready: Bool { procID != nil }
 
@@ -319,6 +320,7 @@ final class Engine {
         if want && !ioRunning {
             dsp.resetState()
             dsp.heardAudio.store(false, ordering: .relaxed)
+            onIOWillStart()
             let err = AudioDeviceStart(aggID, procID)
             if err == noErr { ioRunning = true; ioStarted = Date(); startFailed = false; onIOChange() }
             else if !startFailed { startFailed = true; log("couldn't start the tap (\(err)) — retrying") }
@@ -352,15 +354,21 @@ final class Engine {
 final class MusicWatcher {
     var eqEnabled = true
     var prepared = Set<Int>()
-    var format: String?        // last settled PBAudioFormat; nil = never seen
-    var sawEQLine = false      // have we seen any of Music's EQ log lines at all?
+    var spatial = [Int: Bool]()   // stream number → is it an Atmos/multichannel stream?
+    var current: Int?             // the stream that is actually playing
+    var sawEQLine = false         // have we seen any of Music's EQ log lines at all?
+    // Music pre-loads the next track and attaches its EQ to that stream early, so a
+    // prepared stream that isn't the current one says nothing about the audible audio.
+    var pendingPrepared: Bool { prepared.contains { $0 != current } }
     var onChange: () -> Void = {}
     var onSettings: () -> Void = {}
+    var onStreamStart: () -> Void = {}
 
     let rePrep = try! NSRegularExpression(pattern: #"EQEffectsProcessor::(Prepare|Unprepare) stream (\d+)"#)
     let reSet = try! NSRegularExpression(pattern: #"EQEffectsProcessor::SetEQSettings '.*' \((enabled|disabled)\)"#)
-    let reFmt = try! NSRegularExpression(pattern: #"Audio format changed to PBAudioFormat\.(\w+)"#)
-    let predicate = #"process == "Music" AND ((category == "effects" AND (eventMessage CONTAINS "EQEffectsProcessor::" OR eventMessage CONTAINS "EQManager::SetEQSettings")) OR eventMessage CONTAINS "Audio format changed to PBAudioFormat")"#
+    let reNew = try! NSRegularExpression(pattern: #"RP/NQ\.(\d+) Created new AudioQueue for format:'([^']+)'.*?channelsPerFrame:(\d+)"#)
+    let reStart = try! NSRegularExpression(pattern: #"faqrp_(?:startTimebaseCommon|transitionCallback): \(0x[0-9a-f]+ RP/NQ\.(\d+)\).*calling CMTimebaseSetRateAndAnchor"#)
+    let predicate = #"process == "Music" AND ((category == "effects" AND (eventMessage CONTAINS "EQEffectsProcessor::" OR eventMessage CONTAINS "EQManager::SetEQSettings")) OR eventMessage CONTAINS "Created new AudioQueue for format" OR eventMessage CONTAINS "calling CMTimebaseSetRateAndAnchor")"#
 
     func handle(_ line: String, live: Bool = true) {
         let r = NSRange(line.startIndex..., in: line)
@@ -371,9 +379,13 @@ final class MusicWatcher {
         } else if let m = reSet.firstMatch(in: line, range: r), let k = Range(m.range(at: 1), in: line) {
             eqEnabled = line[k] == "enabled"
             sawEQLine = true
-        } else if let m = reFmt.firstMatch(in: line, range: r), let k = Range(m.range(at: 1), in: line) {
-            if line[k] == "other" { return }  // transient value between tracks
-            format = String(line[k])
+        } else if let m = reNew.firstMatch(in: line, range: r), let n = Range(m.range(at: 1), in: line), let f = Range(m.range(at: 2), in: line),
+                  let c = Range(m.range(at: 3), in: line), let id = Int(line[n]) {
+            spatial[id] = line[f] == "qc+3" || (Int(line[c]) ?? 2) > 2
+            if spatial.count > 64, let oldest = spatial.keys.min() { spatial[oldest] = nil }
+        } else if let m = reStart.firstMatch(in: line, range: r), let n = Range(m.range(at: 1), in: line), let id = Int(line[n]) {
+            current = id
+            if live { onStreamStart() }
         } else if line.contains("EQManager::SetEQSettings") {
             sawEQLine = true
             if live { onSettings() }
@@ -387,14 +399,15 @@ final class MusicWatcher {
             .split(separator: "\n").forEach { handle(String($0), live: false) }
     }
 
-    // Format lines are only logged on track changes, so a long Repeat One session can
-    // outlast the quick replay. Fill only what is still unknown, off the main thread.
+    // A stream that has been playing (or paused) for longer than the quick replay window
+    // has no creation line in it. Fill only what is still unknown, off the main thread.
     func backfillIfNeeded() {
-        guard format == nil || !sawEQLine else { return }
+        guard current == nil || spatial[current!] == nil || !sawEQLine else { return }
         DispatchQueue.global().async {
             let old = MusicWatcher(); old.replay("6h")
             DispatchQueue.main.async {
-                if self.format == nil { self.format = old.format }
+                if self.current == nil { self.current = old.current }
+                for (k, v) in old.spatial where self.spatial[k] == nil { self.spatial[k] = v }
                 if !self.sawEQLine && old.sawEQLine { self.sawEQLine = true; self.eqEnabled = old.eqEnabled; self.prepared = old.prepared }
                 self.onChange()
             }
@@ -490,6 +503,7 @@ var always = false
 var testSeconds = 0.0
 var targetPID: pid_t?
 var preampOverride: Double?
+var replayWindow: String?
 var args = CommandLine.arguments.dropFirst().makeIterator()
 while let a = args.next() {
     switch a {
@@ -498,12 +512,15 @@ while let a = args.next() {
     case "--test": testSeconds = Double(args.next() ?? "") ?? 15
     case "--target": targetPID = args.next().flatMap { pid_t($0) }
     case "--preamp": preampOverride = args.next().flatMap { Double($0) }
+    case "--replay": replayWindow = args.next()
     default:
         print("""
         usage: atmoseq [--preset NAME] [--preamp DB] [--always] [--test SECONDS [--target PID]]
           --preset  Music EQ preset to mirror while the Equalizer window is closed
                     (default: the last one seen in that window, else Manual)
           --preamp  use this preamp (EQ strength) instead of Music's slider
+          --replay  diagnostic: run Music's log history (e.g. 30m) through the decision
+                    logic, print every change of mind, and exit
           --always  apply EQ regardless of Music's own EQ state (turn Music's EQ off)
           --test    silent self-test: helper outputs nothing, records dry + EQ'd audio
                     to test-dry.wav / test-eq.wav. Music stays audible; any other
@@ -519,23 +536,31 @@ let watcher = MusicWatcher()
 var lastPreset: [Double] = []
 var lastWet: Bool?
 var lastReason = ""
+// Set when playback (re)starts while a pre-loaded stream already has Music's EQ: that
+// stream is probably the one starting, so stay dry until the log confirms which it is.
+var holdUntil = Date.distantPast
 var reportedAudio = false
 
+// Why we are NOT adding EQ right now; empty = add it. EQ goes on only when the stream
+// that is PLAYING is an Atmos stream and Music's own EQ is not attached to it.
+// Anything unknown → stay out (never double the EQ).
+func passthroughReason() -> String {
+    if !watcher.sawEQLine { return "can't see Music's EQ log lines yet" }
+    if !watcher.eqEnabled { return "Music's EQ is off" }
+    if holdUntil > Date() { return "song change — waiting to see which stream starts" }
+    guard let cur = watcher.current, let spatial = watcher.spatial[cur] else { return "don't know which stream is playing yet" }
+    if !spatial { return "stereo stream \(cur) — Music's own EQ handles it" }
+    if watcher.prepared.contains(cur) { return "Music's own EQ is running on stream \(cur)" }
+    return ""
+}
+
 func updateWet() {
-    // Add EQ only when Music's log says: EQ is on, the track is Atmos, and Music's own EQ
-    // isn't running on it. Unknown or missing log lines → stay out (never double the EQ).
-    let reason: String
-    if test || always { reason = "" }
-    else if !watcher.sawEQLine { reason = "can't see Music's EQ log lines yet" }
-    else if !watcher.eqEnabled { reason = "Music's EQ is off" }
-    else if let f = watcher.format, f != "dolbyAtmos" { reason = "stereo track (\(f)) — Music's own EQ handles it" }
-    else if !watcher.prepared.isEmpty { reason = "Music's own EQ is running on this stream" }
-    else { reason = "" }
+    let reason = test || always ? "" : passthroughReason()
     let wet = reason.isEmpty
     dsp.wantWet.store(wet, ordering: .relaxed)
     if !test && (wet != lastWet || reason != lastReason) {
         lastWet = wet; lastReason = reason
-        log(wet ? "Atmos track, Music skipped its EQ → applying \"\(presetName)\"" : "passthrough: \(reason)")
+        log(wet ? "Atmos stream, Music skipped its EQ → applying \"\(presetName)\"" : "passthrough: \(reason)")
     }
 }
 
@@ -576,6 +601,13 @@ func pollEQWindow() {
     }
 }
 
+engine.onIOWillStart = {
+    guard !test, !always, watcher.pendingPrepared else { return }
+    holdUntil = Date().addingTimeInterval(2)
+    dsp.wet = 0   // IO is stopped here, so the render thread isn't touching this
+    updateWet()
+    DispatchQueue.main.asyncAfter(deadline: .now() + 2.05) { updateWet() }   // fallback release
+}
 engine.onIOChange = {
     if engine.ioRunning { reportedAudio = false }
     log(engine.ioRunning ? "playing → tap running" : "stopped → tap idle (device free to sleep)")
@@ -600,6 +632,7 @@ func tick() {
         }
     }
     engine.sync()
+    if !test { updateWet() }
     let pid = targetPID ?? musicPID()
     let uid = defaultOutput()?.1 ?? ""
     if let pid {
@@ -637,6 +670,16 @@ for sig in [SIGINT, SIGTERM] {
     _ = Unmanaged.passRetained(src)
 }
 
+if let w = replayWindow {
+    var last = "?"
+    for line in run("/usr/bin/log", ["show", "--last", w, "--style", "compact", "--predicate", watcher.predicate]).split(separator: "\n") {
+        watcher.handle(String(line), live: false)
+        let r = passthroughReason()
+        if r != last { last = r; print(line.prefix(23), r.isEmpty ? "APPLY (stream \(watcher.current ?? -1))" : "passthrough: \(r)") }
+    }
+    exit(0)
+}
+
 if test {
     dsp.testMode = true
     dsp.recCap = Int(testSeconds * 48000 * 1.1)
@@ -646,6 +689,7 @@ if test {
 }
 if !always && !test { watcher.replay("20m"); watcher.stream() }
 watcher.onChange = updateWet
+watcher.onStreamStart = { holdUntil = .distantPast }   // runs before onChange → updateWet
 var lastSettingsRefresh = Date.distantPast
 watcher.onSettings = {
     // Without the window reader, follow Music's "settings changed" events (throttled).

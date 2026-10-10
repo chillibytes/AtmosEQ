@@ -15,7 +15,7 @@ AtmosEQ is a small command-line helper that runs next to Music:
 - It taps Music's output after Music has rendered Atmos, so spatial rendering and head tracking are untouched.
 - It applies the EQ Music would have applied. The filter design and the preamp behaviour were measured from Music itself and match within about 0.3 dB.
 - It reads the sliders from Music's own Equalizer window, so you keep using that window as before. Changes apply while you drag.
-- It only steps in when Music reports an Atmos track and has skipped its own EQ. Stereo tracks pass through untouched, so nothing is equalized twice.
+- It only steps in when the stream that is playing is an Atmos stream and Music has skipped its own EQ on it. Stereo tracks pass through untouched, so nothing is equalized twice.
 - Its audio stream runs only while Music is playing, so it does not keep your headphones or your Mac awake.
 
 ## Requirements
@@ -39,8 +39,8 @@ A normal session looks like this:
 tap ready on AirPods Pro @ 48000 Hz, 2 ch (device-stream tap, no drift compensation)
 playing → tap running
 EQ "Manual": preamp -2.8 dB (EQ strength 73%), bands 12.0 8.6 4.6 2.0 0.0 2.2 2.4 2.5 3.8 3.3
-Atmos track, Music skipped its EQ → applying "Manual"
-passthrough: stereo track (lossless) — Music's own EQ handles it
+Atmos stream, Music skipped its EQ → applying "Manual"
+passthrough: stereo stream 865 — Music's own EQ handles it
 stopped → tap idle (device free to sleep)
 ```
 
@@ -76,12 +76,14 @@ Music itself only reads the preamp when a track starts. AtmosEQ applies it while
 | `--always` | Apply the EQ to everything and ignore Music's log. Switch Music's own EQ off if you use this. |
 | `--test SECONDS` | Silent self-test. Outputs nothing and records the audio before and after the EQ to `test-dry.wav` and `test-eq.wav`. |
 | `--target PID` | With `--test`: tap another process instead of Music (it is muted). Used with `research/tonegen`. |
+| `--replay WINDOW` | Diagnostic. Runs Music's log history (for example `30m`) through the decision logic, prints every change of mind, and exits. |
 
 ## Status and limits
 
 - Tested on macOS 26.7.1 (25G241) with Music 1.6.6 and AirPods Pro 3. It follows output changes and has also attached to AirPods Max and the built-in speakers.
 - It runs in a terminal. There is no login item or menu bar app yet.
-- It depends on three of Music's log messages: `EQEffectsProcessor::Prepare/Unprepare stream`, `EQEffectsProcessor::SetEQSettings` and `Audio format changed to PBAudioFormat`. If a macOS update removes them, the helper stops adding EQ and Atmos plays flat again; it never stacks a second EQ on a stereo track.
+- It depends on four log messages from the Music process: `EQEffectsProcessor::Prepare/Unprepare stream`, `EQEffectsProcessor::SetEQSettings`, `Created new AudioQueue for format` and `faqrp_startTimebaseCommon … calling CMTimebaseSetRateAndAnchorTime`. If a macOS update removes them, the helper stops adding EQ and Atmos plays flat again; it never stacks a second EQ on a stereo track.
+- When an Atmos track is followed by a stereo one, the handover to Music's own EQ waits for a log line. If playback restarts between the two tracks, which is the usual case, the helper holds back until it knows which stream started. On a truly gapless change the first fraction of a second of the stereo track can get both EQs.
 - Only boosts were measured. Sliders below 0 dB are assumed to mirror boosts.
 - If Music plays to something other than the system output device, such as AirPlay, there is nothing to tap and the helper stays idle.
 - The tap adds about one audio buffer of delay (roughly 10 ms).
