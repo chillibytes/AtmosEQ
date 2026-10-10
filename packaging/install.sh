@@ -1,6 +1,8 @@
 #!/bin/zsh
-# Builds AtmosEQ.app, installs it in ~/Applications and registers it as a login item
-# (a LaunchAgent, so it also restarts if it ever crashes).
+# Builds AtmosEQ.app (the launcher, which holds the permissions) and the engine, installs
+# them, and registers a login item (a LaunchAgent, so it also restarts after a crash).
+# Permissions belong to the launcher, so they survive engine updates; only a changed
+# launcher has to be allowed again.
 set -eu
 cd "${0:A:h}/.."
 LABEL=dev.chillibytes.atmoseq
@@ -8,11 +10,15 @@ APP="$HOME/Applications/AtmosEQ.app"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 LOG="$HOME/Library/Logs/AtmosEQ.log"
 BUILD=build/AtmosEQ.app
+ENGINE_DIR="$HOME/Library/Application Support/AtmosEQ"
 
 rm -rf build && mkdir -p "$BUILD/Contents/MacOS"
-swiftc -O -swift-version 5 main.swift -o "$BUILD/Contents/MacOS/AtmosEQ"
+swiftc -O -swift-version 5 packaging/launcher.swift -o "$BUILD/Contents/MacOS/AtmosEQ"
 cp packaging/Info.plist "$BUILD/Contents/Info.plist"
 codesign --force --sign - --identifier "$LABEL" "$BUILD" 2>/dev/null   # ad hoc
+# The engine stays a plain binary outside the bundle (see packaging/launcher.swift).
+swiftc -O -swift-version 5 main.swift -o build/atmoseq 2>/dev/null
+codesign --force --sign - --identifier atmoseq build/atmoseq
 
 cdhash() { codesign -dvvv "$1" 2>&1 | awk -F= '/^CDHash=/{print $2}'; }
 launchctl bootout "gui/$UID/$LABEL" 2>/dev/null || true
@@ -26,11 +32,14 @@ else
   if [[ -d "$APP" ]]; then
     # macOS ties permissions to the exact ad-hoc build. Clear the old grants so it asks
     # again instead of silently refusing.
-    for service in AudioCapture AppleEvents Accessibility; do tccutil reset $service "$LABEL" >/dev/null 2>&1 || true; done
+    for service in AudioCapture ScreenCapture AppleEvents Accessibility; do tccutil reset $service "$LABEL" >/dev/null 2>&1 || true; done
     rm -rf "$APP"
   fi
   cp -R "$BUILD" "$APP"
 fi
+
+mkdir -p "$ENGINE_DIR"
+cp build/atmoseq "$ENGINE_DIR/atmoseq"
 
 sed -e "s|@APP@|$APP|g" -e "s|@LOG@|$LOG|g" "packaging/$LABEL.plist" > "$PLIST"
 launchctl bootstrap "gui/$UID" "$PLIST"

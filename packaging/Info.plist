@@ -20,8 +20,6 @@
 	<string>26.0</string>
 	<key>LSUIElement</key>
 	<true/>
-	<key>NSAudioCaptureUsageDescription</key>
-	<string>AtmosEQ listens to Music's sound so it can apply your equalizer to Dolby Atmos tracks.</string>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>AtmosEQ reads your equalizer preset from Music.</string>
 </dict>

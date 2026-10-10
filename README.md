@@ -39,11 +39,13 @@ Leave it running in a terminal. Ctrl-C stops it and Music plays as before.
 make install
 ```
 
-This builds `AtmosEQ.app`, puts it in `~/Applications`, and registers it as a login item (a LaunchAgent, so it also comes back if it ever crashes). It has no window or menu bar icon; what it is doing is in `~/Library/Logs/AtmosEQ.log`. It never launches Music by itself and sits idle until Music plays.
+This builds `AtmosEQ.app` (a small launcher), puts it in `~/Applications`, installs the engine in `~/Library/Application Support/AtmosEQ`, and registers a login item (a LaunchAgent, so it also comes back if it ever crashes). It has no window or menu bar icon; what it is doing is in `~/Library/Logs/AtmosEQ.log`. It never launches Music by itself and sits idle until Music plays.
 
 `make uninstall` stops it and removes the app, the login item and its permission entries.
 
-The app is ad-hoc signed, and macOS ties permissions to the exact build. Reinstalling an unchanged build keeps them; after a change the installer clears the old entries and macOS asks again.
+Permissions belong to the launcher app, which is ad-hoc signed; macOS ties them to its exact build. Engine changes keep them. A changed launcher makes the installer clear the old entries, and macOS asks again.
+
+On first install, add AtmosEQ by hand under System Settings > Privacy & Security > Screen & System Audio Recording (the **+** button, or drag it in from `~/Applications`): an app started in the background is not added to that list automatically. Until then it waits and Music plays untouched.
 
 A normal session looks like this:
 
@@ -58,11 +60,11 @@ stopped → tap idle (device free to sleep)
 
 ## Permissions
 
-macOS asks for these on behalf of the app you start the helper from (Terminal, iTerm and so on), or for AtmosEQ itself when it is installed as a login item:
+macOS checks these against the app the helper runs under: your terminal app, or AtmosEQ when it is installed as a login item:
 
 | Permission | Needed for | Without it |
 |---|---|---|
-| System Audio Recording | the audio tap | The tap delivers silence. The helper notices within a few seconds and lets go, so Music is audible again. |
+| Screen Recording (the "Screen & System Audio Recording" list), or System Audio Recording | the audio tap | The tap delivers silence. The helper notices within a few seconds and lets go, so Music is audible again. |
 | Automation → Music | reading preset values by name | No EQ values when the Equalizer window is closed. |
 | Accessibility | reading the Equalizer window's sliders live | It follows one preset by name (`--preset`, default `Manual`) with a short delay. |
 
@@ -94,7 +96,7 @@ Music itself only reads the preamp when a track starts. AtmosEQ applies it while
 
 - Tested on macOS 26.7.1 (25G241) with Music 1.6.6 and AirPods Pro 3. It follows output changes and has also attached to AirPods Max and the built-in speakers.
 - There is no menu bar icon or settings window. As a login item its only output is the log file.
-- Inside the app bundle the helper checks and requests the System Audio Recording permission through a private TCC call, because there is no public one. If a macOS update removes it, the helper falls back to the silence failsafe.
+- The login item uses Screen Recording, not System Audio Recording, on purpose: coreaudiod accepts either for a tap, and only the System Audio Recording route turns on the purple recording indicator in the menu bar. Screen Recording is the broader permission; AtmosEQ never captures the screen. The app bundle has no audio-capture usage string, so macOS refuses the narrower permission without asking and falls back to Screen Recording.
 - It depends on four log messages from the Music process: `EQEffectsProcessor::Prepare/Unprepare stream`, `EQEffectsProcessor::SetEQSettings`, `Created new AudioQueue for format` and `faqrp_startTimebaseCommon … calling CMTimebaseSetRateAndAnchorTime`. If a macOS update removes them, the helper stops adding EQ and Atmos plays flat again; it never stacks a second EQ on a stereo track.
 - When an Atmos track is followed by a stereo one, the handover to Music's own EQ waits for a log line. If playback restarts between the two tracks, which is the usual case, the helper holds back until it knows which stream started. On a truly gapless change the first fraction of a second of the stereo track can get both EQs.
 - Only boosts were measured. Sliders below 0 dB are assumed to mirror boosts.

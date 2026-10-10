@@ -144,6 +144,23 @@ Measured through the helper's real pipeline (`atmoseq --test`), band centres in 
 
 The two sets come from different passages, and the 32 Hz column rests on one or two FFT bins, so differences of half a dB there are within the measurement.
 
+## 4b. Permission routes and the recording indicator
+
+When a process creates a tap, coreaudiod asks TCC about the app responsible for it, in this order (unified log, `tccd`):
+
+```
+kTCCServiceMicrophone      authValue=2
+kTCCServiceScreenCapture   authValue=2
+kTCCServiceAudioCapture    "Refusing authorization request … without" (no usage string)  authValue=0
+kTCCServiceScreenCapture   authValue=2   → tap allowed
+```
+
+That trace is atmoseq started from iTerm2, which has Screen Recording but no System Audio Recording. The tap works and ControlCenter's `sensor-indicators` log shows no attribution at all: no purple dot.
+
+When the responsible app holds System Audio Recording instead (AtmosEQ.app with `NSAudioCaptureUsageDescription`), ControlCenter logs `Active activity attributions changed to ["aud:dev.chillibytes.atmoseq"]` and the dot appears for as long as the tap runs.
+
+So the login item's launcher has no `NSAudioCaptureUsageDescription` and asks for Screen Recording. `CGPreflightScreenCaptureAccess` keeps its first answer for the life of the process, so the launcher exits while permission is missing and launchd starts it again.
+
 ## 5. Other things that are broken in Music
 
 - AppleScript `EQ enabled` reads `false` while the EQ is on, and cannot be set (error −10006).
