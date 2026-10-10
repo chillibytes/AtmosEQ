@@ -58,6 +58,10 @@ The first argument to `preamplaw` is the ten band sliders in dB, as they were du
 
 `results/preamplaw-output.txt` is the output from the original run (five recordings: preamp 0, −6, −12, and two at −2.76 from other songs).
 
+## Charts
+
+`charts.py` draws the README charts into `docs/` (light and dark SVGs). The EQ chart comes from `results/preamplaw-output.txt`; the pitch chart needs the `drift_on` and `dev_off` recordings from the clock experiment: `python3 charts.py out`. Needs numpy.
+
 ## Caveats
 
 - `measure-eq.sh` and `measure-preamp.sh` were adapted from the scripts used in the original run: file locations changed and the playlist and track became arguments. They have been syntax-checked but not re-run in this form.
