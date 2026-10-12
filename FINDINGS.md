@@ -170,7 +170,7 @@ The helper therefore takes the EQ's on/off state from Music's log and the slider
 
 ## 6. When the helper adds EQ
 
-Music numbers its audio streams (`RP/NQ.N` in the coremedia log lines, the same `N` as in `EQEffectsProcessor::Prepare stream N`). Three kinds of log line give the full picture:
+Music numbers its audio streams (`RP/NQ.N` in the coremedia log lines — the two letters change between Music sessions, e.g. `RP/OA.N`, the same `N` as in `EQEffectsProcessor::Prepare stream N`). Three kinds of log line give the full picture:
 
 ```
 subaq_buildCAAudioQueue: … RP/NQ.865 Created new AudioQueue for format:'qlac' …, channelsPerFrame:2     ← stream exists, and its format

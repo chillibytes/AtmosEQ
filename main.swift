@@ -400,8 +400,8 @@ final class MusicWatcher {
 
     let rePrep = try! NSRegularExpression(pattern: #"EQEffectsProcessor::(Prepare|Unprepare) stream (\d+)"#)
     let reSet = try! NSRegularExpression(pattern: #"EQEffectsProcessor::SetEQSettings '.*' \((enabled|disabled)\)"#)
-    let reNew = try! NSRegularExpression(pattern: #"RP/NQ\.(\d+) Created new AudioQueue for format:'([^']+)'.*?channelsPerFrame:(\d+)"#)
-    let reStart = try! NSRegularExpression(pattern: #"faqrp_(?:startTimebaseCommon|transitionCallback): \(0x[0-9a-f]+ RP/NQ\.(\d+)\).*calling CMTimebaseSetRateAndAnchor"#)
+    let reNew = try! NSRegularExpression(pattern: #"RP/[A-Z]{2}\.(\d+) Created new AudioQueue for format:'([^']+)'.*?channelsPerFrame:(\d+)"#)
+    let reStart = try! NSRegularExpression(pattern: #"faqrp_(?:startTimebaseCommon|transitionCallback): \(0x[0-9a-f]+ RP/[A-Z]{2}\.(\d+)\).*calling CMTimebaseSetRateAndAnchor"#)
     let predicate = #"process == "Music" AND ((category == "effects" AND (eventMessage CONTAINS "EQEffectsProcessor::" OR eventMessage CONTAINS "EQManager::SetEQSettings")) OR eventMessage CONTAINS "Created new AudioQueue for format" OR eventMessage CONTAINS "calling CMTimebaseSetRateAndAnchor")"#
 
     func handle(_ line: String, live: Bool = true) {
