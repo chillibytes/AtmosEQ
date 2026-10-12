@@ -7,8 +7,12 @@
 ![macOS 26 | 27](https://img.shields.io/badge/macOS-26%20%7C%2027-000000?logo=apple&logoColor=white)
 ![Swift](https://img.shields.io/badge/Swift-single%20file-F05138?logo=swift&logoColor=white)
 ![Dolby Atmos](https://img.shields.io/badge/Apple%20Music-Dolby%20Atmos-FA243C?logo=applemusic&logoColor=white)
+![License: MIT](https://img.shields.io/badge/License-MIT-blue)
 
 </div>
+
+> [!NOTE]
+> macOS 27 is not fully tested yet. AtmosEQ is developed and tested on macOS 26; it runs on the 27 betas, but expect rough edges there. Fixes are on the way as 27 settles.
 
 ## The bug
 
@@ -48,6 +52,13 @@ The EQ AtmosEQ applies, against Music's own EQ measured on a stereo track with t
 - Music's EQ switched on (Window > Equalizer)
 
 ## Build and run
+
+There is no prebuilt download: AtmosEQ is ad-hoc signed, not notarized, so a downloaded binary would be blocked by Gatekeeper. Building from source takes a few seconds.
+
+```sh
+git clone https://github.com/chillibytes/AtmosEQ.git
+cd AtmosEQ
+```
 
 ```sh
 make          # or: swiftc -O -swift-version 5 main.swift -o atmoseq
@@ -118,6 +129,8 @@ Music itself only reads the preamp when a track starts. AtmosEQ applies it while
 ## Status and limits
 
 - Tested on macOS 26.7.1 (25G241) with Music 1.6.6 and AirPods Pro 3. It follows output changes and has also attached to AirPods Max and the built-in speakers.
+- macOS 27 is not fully tested yet. It has run on the 27.2 developer beta, but betas change Music's logging and audio stack between builds; fixes will follow as issues show up.
+- This works around an Apple bug. If a macOS update fixes Music's EQ for Atmos, AtmosEQ is no longer needed and stays out of the way, since it only steps in when Music has skipped its own EQ.
 - There is no menu bar icon or settings window. As a login item its only output is the log file.
 - The login item uses Screen Recording, not System Audio Recording, on purpose: coreaudiod accepts either for a tap, and only the System Audio Recording route turns on the purple recording indicator in the menu bar. Screen Recording is the broader permission; AtmosEQ never captures the screen. The app bundle has no audio-capture usage string, so macOS refuses the narrower permission without asking and falls back to Screen Recording.
 - It depends on four log messages from the Music process: `EQEffectsProcessor::Prepare/Unprepare stream`, `EQEffectsProcessor::SetEQSettings`, `Created new AudioQueue for format` and `faqrp_startTimebaseCommon … calling CMTimebaseSetRateAndAnchorTime`. If a macOS update removes them, the helper stops adding EQ and Atmos plays flat again; it never stacks a second EQ on a stereo track.
@@ -138,6 +151,10 @@ The clock problem is why the first build made track starts sound slowed down. Du
 </picture>
 
 The tools used for those measurements are in [research/](research/).
+
+## License
+
+[MIT](LICENSE)
 
 ## Disclaimer
 
