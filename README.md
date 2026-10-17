@@ -77,9 +77,9 @@ This builds `AtmosEQ.app` (a small launcher), puts it in `~/Applications`, insta
 
 `make uninstall` stops it and removes the app, the login item and its permission entries.
 
-Permissions belong to the launcher app, which is ad-hoc signed; macOS ties them to its exact build. Engine changes keep them. A changed launcher makes the installer clear the old entries, and macOS asks again.
+Run it in Terminal: it then walks you through the permissions. For Screen & System Audio Recording and Accessibility it opens System Settings at the right list and waits until you turn AtmosEQ on, then asks once whether AtmosEQ may control Music. Until Screen Recording is on, AtmosEQ waits and Music plays untouched. Ctrl-C stops the waiting; running `make install` again picks up where it left off.
 
-On first install, add AtmosEQ by hand under System Settings > Privacy & Security > Screen & System Audio Recording (the **+** button, or drag it in from `~/Applications`): an app started in the background is not added to that list automatically. Until then it waits and Music plays untouched.
+Running `make install` again is safe, for example after a `git pull`. Permissions belong to the launcher app, which is ad-hoc signed; macOS ties them to its exact build. Engine changes keep them, and so do compiler updates, since the installed launcher is only replaced when its source changes. When it is replaced, the installer clears the old entries and asks again.
 
 A normal session looks like this:
 
